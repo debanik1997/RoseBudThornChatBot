@@ -1,4 +1,3 @@
-import flask
 import nltk
 from nltk.stem.lancaster import LancasterStemmer
 stemmer = LancasterStemmer()
@@ -7,14 +6,18 @@ from keras.models import Sequential
 from keras.layers import Dense, Activation, Dropout
 from keras.optimizers import SGD
 from keras.models import load_model
-
 import tensorflow as tf
 from tensorflow import keras
-
 import pandas as pd
 import pickle
 import random
 import json
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse, Message
+from twilio.rest import Client
+import urllib
+
+
 
 def clean_up_sentence(sentence):
 	# tokenize the pattern - split words into array
@@ -22,7 +25,7 @@ def clean_up_sentence(sentence):
 	# stem each word - create short form for word
 	sentence_words = [stemmer.stem(word.lower()) for word in sentence_words]
 	return sentence_words
-# return bag of words array: 0 or 1 for each word in the bag that exists in the sentence
+
 def bow(sentence, words, show_details=True):
 	# tokenize the pattern
 	sentence_words = clean_up_sentence(sentence)
@@ -31,19 +34,15 @@ def bow(sentence, words, show_details=True):
 	for s in sentence_words:
 		for i,w in enumerate(words):
 			if w == s: 
-				# assign 1 if current word is in the vocabulary position
 				bag[i] = 1
-				if show_details:
-					print ("found in bag: %s" % w)
 	return(np.array(bag))
 
-
-
-app = flask.Flask(__name__)
+client = Client('ACd6999e72ac712cfec4833726199e1129', '75741f5eb5f52ec79df75c4832d99fa4')
+app = Flask(__name__)
 def init():
 	global model,graph
 	# load the pre-trained Keras model
-	model = load_model('RBTNewPrediction.h5')
+	model = load_model('models/RBTNewPrediction.h5')
 	graph = tf.get_default_graph()
 
 def getSentence():
@@ -59,23 +58,31 @@ def sendResponse(responseObj):
 	response.headers.add('Access-Control-Allow-Credentials', True)
 	return response
 
-# API for prediction
 @app.route("/prediction", methods=["GET"])
 def prediction():
-#     guess = flask.request.args.get('name')
 	sentence = getSentence()
 	s = sentence[0]
 	p = bow(s, words)
-#     inputFeature = np.asarray(parameters).reshape(1, 12)
 	with graph.as_default():
 		results = model.predict( np.array( [p,] )  )
 		arr = np.where(results == np.amax(results))
-		raw_prediction = classes[arr[1][0]]
-		return sendResponse({raw_prediction: 1})
+		guess = classes[arr[1][0]]
+		return sendResponse({"prediction": guess})
 
-if __name__ == "__main__":
-	print(("* Loading Keras model and Flask starting server..." "please wait until server has fully started"))
-	
+@app.route('/sms', methods=['POST'])
+def inbound_sms():
+	resp = MessagingResponse()
+	sentence = request.values.get('Body', None)
+	p = bow(sentence, words)
+	with graph.as_default():
+		results = model.predict( np.array( [p,] )  )
+		arr = np.where(results == np.amax(results))
+		guess = classes[arr[1][0]]
+		resp.message("I'm gonna guess that was a: " + guess)
+
+	return str(resp)
+
+if __name__ == "__main__":	
 	with open('intents.json') as data:
 		intents = json.load(data)
 	
@@ -98,3 +105,9 @@ if __name__ == "__main__":
 
 	init()
 	app.run(threaded=True)
+
+
+
+
+
+
